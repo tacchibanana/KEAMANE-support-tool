@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ケアプラン費用＆経営シミュレーター</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700;900&display=swap');
+        body { font-family: 'Noto Sans JP', sans-serif; background-color: #f0fdf4; color: #1a202c; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .card { background: white; border-radius: 20px; border: 2px solid #e2e8f0; padding: 24px; margin-bottom: 24px; }
+        input[type="number"], input[type="text"], select { border: 2px solid #cbd5e1; border-radius: 12px; padding: 10px; width: 100%; font-weight: 900; color: #1e293b; }
+        input[type="number"] { font-size: 1.5rem; text-align: center; }
+        
+        /* 印刷用スタイル */
+        @media print {
+            nav, .no-print, button, #settings, #dash, #fixed-footer, .star-btn, input[type="checkbox"] { display: none !important; }
+            body { background: white !important; padding: 0 !important; font-size: 10pt; }
+            .p-4 { padding: 0 !important; }
+            .card { border: 1px solid #ccc !important; border-radius: 8px !important; margin-bottom: 10px !important; padding: 15px !important; page-break-inside: avoid; }
+            .max-w-lg { max-width: 100% !important; }
+            .print-only { display: block !important; }
+            
+            /* 選択済みアイテムを1行のリスト形式にする */
+            .calc-item-row { display: none !important; }
+            .calc-item-row.item-checked { 
+                display: flex !important; 
+                border: none !important; 
+                border-bottom: 1px dashed #eee !important; 
+                padding: 4px 0 !important; 
+                background: transparent !important;
+                box-shadow: none !important;
+            }
+            .calc-item-row.item-checked span { font-weight: normal !important; }
+            #over-alert-main { display: block !important; border: 2px solid red !important; }
+            h2 { font-size: 14pt !important; margin-bottom: 10px !important; }
+        }
+        .print-only { display: none; }
+    </style>
+</head>
+<body class="p-0 pb-28">
+
+    <nav class="bg-[#0f766e] text-white p-4 sticky top-0 z-50 flex justify-around shadow-xl no-print">
+        <button onclick="showTab('calc')" class="text-base font-black">💰 プラン計算</button>
+        <button onclick="showTab('dash')" class="text-base font-black">📈 経営分析</button>
+        <button onclick="showTab('settings')" class="text-base font-black">⚙️ 設定</button>
+    </nav>
+
+    <div class="p-4 max-w-lg mx-auto">
+        <div class="print-only mb-6 border-b-4 border-black pb-2 text-center">
+            <h1 class="text-2xl font-black">介護サービス ご利用概算見積書</h1>
+            <p class="text-right mt-2 text-sm">作成日: <span id="print-date"></span></p>
+        </div>
+
+        <section id="calc" class="tab-content active">
+            <div class="flex justify-between items-center mb-6 no-print">
+                <h2 class="text-2xl font-black text-[#1e293b]">利用費用を計算する</h2>
+                <button onclick="window.print()" class="bg-teal-700 text-white px-6 py-3 rounded-full font-black shadow-lg hover:bg-teal-800 transition-all text-sm">🖨️ 印刷/保存</button>
+            </div>
+            
+            <div class="card shadow-sm">
+                <div class="grid grid-cols-2 gap-4 mb-4 no-print">
+                    <div class="flex flex-col">
+                        <label class="text-xs font-bold text-gray-500 mb-1">サービス種類</label>
+                        <select id="calc-type" class="p-3 border-2 border-teal-200 bg-teal-50" onchange="renderCalcItems()">
+                            <option value="home_help">訪問介護</option>
+                            <option value="day_care">通所介護</option>
+                            <option value="sogo">総合事業(訪問/通所)</option>
+                        </select>
+                    </div>
+                    <div class="flex flex-col">
+                        <label class="text-xs font-bold text-gray-500 mb-1">利用者負担割合</label>
+                        <select id="user-ratio" class="p-3 border-2 border-amber-200 bg-amber-50" onchange="calculate()">
+                            <option value="0.1">1割負担</option>
+                            <option value="0.2">2割負担</option>
+                            <option value="0.3">3割負担</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="mb-4">
+                    <label class="text-xs font-bold text-gray-500 mb-1">要介護度（上限設定）</label>
+                    <select id="care-level" class="p-3 border-2 border-indigo-200 bg-indigo-50" onchange="calculate()">
+                        <option value="999999">設定しない</option>
+                        <option value="5032">要支援1 (5,032単位)</option>
+                        <option value="10531">要支援2 (10,531単位)</option>
+                        <option value="16765">要介護1 (16,765単位)</option>
+                        <option value="19705">要介護2 (19,705単位)</option>
+                        <option value="27048">要介護3 (27,048単位)</option>
+                        <option value="30938">要介護4 (30,938単位)</option>
+                        <option value="36217">要介護5 (36,217単位)</option>
+                    </select>
+                </div>
+
+                <div class="p-4 bg-slate-50 rounded-2xl mb-6 border-2 border-slate-200 print:bg-white print:border-none print:p-0">
+                    <label class="text-base font-black text-slate-800 mb-3 block text-center print:text-left print:mb-1">① ひと月の利用回数</label>
+                    <div class="flex items-center gap-6 mb-4 no-print">
+                        <button onclick="adjustVal('input-visit-count', -1)" class="w-14 h-14 bg-white border-2 border-slate-300 rounded-full font-black text-3xl shadow-sm">-</button>
+                        <input type="number" id="input-visit-count" value="4" min="0" class="flex-1 text-4xl" oninput="calculate()">
+                        <button onclick="adjustVal('input-visit-count', 1)" class="w-14 h-14 bg-white border-2 border-slate-300 rounded-full font-black text-3xl shadow-sm">+</button>
+                    </div>
+                    <p class="print-only font-bold mb-4">月間利用回数: <span id="print-visit-count">4</span> 回</p>
+
+                    <div class="mt-4">
+                        <p class="text-xs font-black text-slate-400 uppercase border-b-2 border-slate-200 pb-1 mb-3 print:text-black">選択されたサービス・加算</p>
+                        <input type="text" id="search-word" placeholder="🔍 サービス名で検索..." class="no-print mb-4 pl-10 p-3 bg-white border-2 border-slate-200 rounded-xl" oninput="renderCalcItems()">
+                        <div id="over-alert-main" class="hidden bg-red-100 border-l-4 border-red-500 text-red-700 p-3 mb-4 font-bold text-xs">
+                            ⚠️ 支給限度額を超過しています！
+                        </div>
+                        <div id="calc-items" class="space-y-2"></div>
+                    </div>
+                </div>
+
+                <div class="p-4 bg-amber-50 rounded-2xl border-2 border-amber-100 print:bg-white print:border-t print:border-black print:rounded-none">
+                    <label class="text-base font-black text-amber-900 mb-2 block text-center print:text-left">② 全額自己負担（実費）</label>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="text-center print:text-left">
+                            <p class="text-xs font-bold text-amber-600 mb-1">利用日数</p>
+                            <input type="number" id="input-special-count" value="0" min="0" class="no-print" oninput="calculate()">
+                            <p class="print-only font-bold"><span id="print-spec-count">0</span>回</p>
+                        </div>
+                        <div class="text-center print:text-left">
+                            <p class="text-xs font-bold text-amber-600 mb-1">単価(円)</p>
+                            <input type="number" id="input-special-price" value="650" min="0" class="no-print" oninput="calculate()">
+                            <p class="print-only font-bold">¥<span id="print-spec-price">650</span></p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 経営分析タブ、設定タブは共通（省略せず統合） -->
+        <section id="dash" class="tab-content no-print">
+            <h2 class="text-2xl font-black mb-6">居宅介護支援 経営分析</h2>
+            <div class="card space-y-6">
+                <div class="grid grid-cols-2 gap-4">
+                    <div><label class="text-xs font-bold text-teal-600 mb-1 block">要支援/予防 単価</label><input type="number" id="input-light" value="4380" oninput="updateDashboard()"></div>
+                    <div><label class="text-xs font-bold text-emerald-600 mb-1 block">要介護 単価</label><input type="number" id="input-heavy" value="10530" oninput="updateDashboard()"></div>
+                </div>
+                <div>
+                    <div class="flex justify-between mb-2 text-sm font-bold"><label>要支援 : 要介護 比率</label><span id="val-ratio">30% : 70%</span></div>
+                    <input type="range" id="slide-ratio" min="0" max="100" step="5" value="30" class="w-full h-3 bg-gray-200 rounded-lg appearance-none accent-teal-600" oninput="updateDashboard()">
+                </div>
+                <div><label class="text-xs font-bold text-red-600 mb-1 block">月間固定費</label><input type="number" id="input-fixed" value="400000" oninput="updateDashboard()"></div>
+            </div>
+            <div class="grid grid-cols-2 gap-4 text-center mb-6">
+                <div class="bg-white p-6 rounded-2xl shadow border-b-8 border-red-500"><p class="text-xs font-bold text-gray-400">損益分岐点</p><p class="text-3xl font-black" id="bep-count">0件</p></div>
+                <div class="bg-white p-6 rounded-2xl shadow border-b-8 border-teal-500"><p class="text-xs font-bold text-gray-400">目標(1.2倍)</p><p class="text-3xl font-black" id="daily-target">0件</p></div>
+            </div>
+            <div class="card"><canvas id="bepChart" height="200"></canvas></div>
+        </section>
+
+        <section id="settings" class="tab-content no-print">
+            <h2 class="text-2xl font-black mb-6">システム設定</h2>
+            <div class="card mb-8 border-teal-500 border-4">
+                <h3 class="text-lg font-black mb-2">📍 地域単価設定</h3>
+                <div class="flex items-center gap-4">
+                    <input type="number" id="care-unit-price" value="10.27" step="0.01" class="text-3xl font-black text-teal-700 bg-teal-50" oninput="calculate()">
+                    <span class="text-xl font-black">円</span>
+                </div>
+            </div>
+            <div id="master-list-container" class="mt-8"></div>
+        </section>
+    </div>
+
+    <div id="fixed-footer" class="fixed bottom-0 left-0 w-full bg-slate-900 text-white p-3 shadow-2xl z-50 no-print transition-colors duration-300">
+        <div class="max-w-lg mx-auto flex justify-between items-center">
+            <div class="flex-1">
+                <p class="text-[10px] text-slate-300 font-bold">合計単位数</p>
+                <div class="flex items-baseline gap-2">
+                    <p class="text-xl font-black" id="fixed-total-units">0 <span class="text-xs">単位</span></p>
+                    <p class="text-[10px] text-red-400 font-bold hidden bg-red-900 px-1 rounded" id="fixed-alert">超過⚠️</p>
+                </div>
+            </div>
+            <div class="text-right border-l border-slate-700 pl-4">
+                <p class="text-[10px] text-slate-300 font-bold">概算負担額</p>
+                <p class="text-2xl font-black text-teal-400" id="fixed-user-cost">¥0</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // PDF資料に基づいた略称と単位（令和7年度改定反映）
+        let masterData = {
+            home_help: [
+                { name: '身体1 (20分未満)', price: 250, logic: 'per-visit', checked: true, favorite: false },
+                { name: '身体2 (20-30分)', price: 402, logic: 'per-visit', checked: false, favorite: false },
+                { name: '身体3 (30-60分)', price: 584, logic: 'per-visit', checked: false, favorite: false },
+                { name: '生活2 (20-45分)', price: 186, logic: 'per-visit', checked: false, favorite: false },
+                { name: '生活3 (45分以上)', price: 228, logic: 'per-visit', checked: false, favorite: false },
+                { name: '初回加算', price: 200, logic: 'once-month', checked: false, favorite: false },
+                { name: '緊急時訪問加算', price: 100, logic: 'per-visit', checked: false, favorite: false },
+                { name: '処遇改善加算Ⅰ (24.5%)', price: 0, logic: 'special', checked: false, favorite: false }
+            ],
+            day_care: [
+                { name: '通常・7-8時間 (要1)', price: 655, logic: 'per-visit', checked: true, favorite: false },
+                { name: '通常・7-8時間 (要2)', price: 773, logic: 'per-visit', checked: false, favorite: false },
+                { name: '通常・7-8時間 (要3)', price: 896, logic: 'per-visit', checked: false, favorite: false },
+                { name: '地密・7-8時間 (要1)', price: 752, logic: 'per-visit', checked: false, favorite: false },
+                { name: '入浴介助加算(Ⅰ)', price: 40, logic: 'per-visit', checked: false, favorite: false },
+                { name: '個別機能訓練加算(Ⅰ)イ', price: 56, logic: 'per-visit', checked: false, favorite: false },
+                { name: '科学的介護推進体制加算', price: 40, logic: 'once-month', checked: false, favorite: false }
+            ],
+            sogo: [
+                { name: '訪問型サ費Ⅰ (週1回)', price: 1176, logic: 'once-month', checked: true, favorite: false },
+                { name: '訪問型サ費Ⅱ (週2回)', price: 2349, logic: 'once-month', checked: false, favorite: false },
+                { name: '通所型サ費Ⅰ (週1回)', price: 1672, logic: 'once-month', checked: false, favorite: false },
+                { name: '通所型サ費Ⅱ (週2回)', price: 3428, logic: 'once-month', checked: false, favorite: false }
+            ]
+        };
+
+        const typeLabels = { 'home_help': '訪問介護', 'day_care': '通所介護', 'sogo': '総合事業' };
+
+        function showTab(tabId) {
+            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+            document.getElementById(tabId).classList.add('active');
+            if(tabId === 'dash') updateDashboard();
+            calculate();
+        }
+
+        function adjustVal(id, amount) {
+            const el = document.getElementById(id);
+            el.value = Math.max(0, parseInt(el.value) + amount);
+            calculate();
+        }
+
+        function toggleFavorite(type, originalIdx) {
+            masterData[type][originalIdx].favorite = !masterData[type][originalIdx].favorite;
+            renderCalcItems();
+        }
+
+        function toggleCheck(type, originalIdx) {
+            masterData[type][originalIdx].checked = !masterData[type][originalIdx].checked;
+            renderCalcItems();
+        }
+
+        function renderCalcItems() {
+            const type = document.getElementById('calc-type').value;
+            const searchWord = document.getElementById('search-word').value.toLowerCase();
+            const container = document.getElementById('calc-items');
+            container.innerHTML = '';
+            
+            let items = masterData[type].map((item, idx) => ({ ...item, originalIdx: idx }));
+            if(searchWord) items = items.filter(item => item.name.toLowerCase().includes(searchWord));
+            items.sort((a, b) => (b.favorite === a.favorite) ? 0 : b.favorite ? 1 : -1);
+
+            items.forEach(item => {
+                const isCheckedStr = item.checked ? 'checked' : '';
+                const activeClass = item.checked ? 'item-checked bg-teal-50 border-teal-500' : 'bg-white border-slate-100';
+                const starColor = item.favorite ? 'text-amber-400' : 'text-slate-300';
+                
+                const label = document.createElement('div');
+                label.className = `calc-item-row flex items-center justify-between p-3 border-2 rounded-xl shadow-sm cursor-pointer transition-all ${activeClass}`;
+                label.innerHTML = `
+                    <div class="flex items-center gap-3 flex-1" onclick="toggleCheck('${type}', ${item.originalIdx})">
+                        <input type="checkbox" class="w-5 h-5 no-print accent-teal-600 pointer-events-none" ${isCheckedStr}>
+                        <div class="flex flex-col">
+                            <span class="text-sm font-black text-slate-700">${item.name}</span>
+                            <span class="text-[9px] text-slate-400 no-print">${item.logic === 'per-visit' ? '回数乗算' : '月額'}</span>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span class="text-sm font-bold text-slate-500">${item.price}u</span>
+                        <button onclick="toggleFavorite('${type}', ${item.originalIdx}); event.stopPropagation();" class="star-btn text-xl no-print ${starColor}">★</button>
+                    </div>
+                `;
+                container.appendChild(label);
+            });
+            calculate();
+        }
+
+        function calculate() {
+            const type = document.getElementById('calc-type').value;
+            const ratio = parseFloat(document.getElementById('user-ratio').value);
+            const visits = parseInt(document.getElementById('input-visit-count').value) || 0;
+            const careLimit = parseInt(document.getElementById('care-level').value);
+            const specialCount = parseInt(document.getElementById('input-special-count').value) || 0;
+            const specialPrice = parseInt(document.getElementById('input-special-price').value) || 0;
+            const careUnitPrice = parseFloat(document.getElementById('care-unit-price').value) || 10.27;
+
+            // 印刷用表示更新
+            document.getElementById('print-date').innerText = new Date().toLocaleDateString('ja-JP');
+            document.getElementById('print-visit-count').innerText = visits;
+            document.getElementById('print-spec-count').innerText = specialCount;
+            document.getElementById('print-spec-price').innerText = specialPrice;
+
+            let totalUnits = 0;
+            masterData[type].forEach((item) => {
+                if(item.checked) {
+                    if(item.logic === 'per-visit') totalUnits += item.price * visits;
+                    else if(item.logic === 'once-month') totalUnits += item.price;
+                }
+            });
+
+            // アラート判定
+            const isOver = careLimit !== 999999 && totalUnits > careLimit;
+            document.getElementById('over-alert-main').classList.toggle('hidden', !isOver);
+            document.getElementById('fixed-alert').classList.toggle('hidden', !isOver);
+            document.getElementById('fixed-footer').className = `fixed bottom-0 left-0 w-full p-3 shadow-2xl z-50 no-print transition-all ${isOver ? 'bg-red-900' : 'bg-slate-900'}`;
+
+            const insuranceUserPay = Math.floor(Math.round(totalUnits * careUnitPrice) * ratio);
+            const userTotal = insuranceUserPay + (specialCount * specialPrice);
+
+            document.getElementById('fixed-total-units').innerHTML = `${totalUnits.toLocaleString()} <span class="text-xs">単位</span>`;
+            document.getElementById('fixed-user-cost').innerText = `¥${userTotal.toLocaleString()}`;
+        }
+
+        // 経営・マスタ系 (機能維持)
+        let myChart;
+        function updateDashboard() {
+            const lightP = parseInt(document.getElementById('input-light').value) || 0;
+            const heavyP = parseInt(document.getElementById('input-heavy').value) || 0;
+            const ratio = parseInt(document.getElementById('slide-ratio').value);
+            const fixed = parseInt(document.getElementById('input-fixed').value) || 0;
+            const avg = (lightP * (ratio/100)) + (heavyP * ((100-ratio)/100));
+            const bep = avg > 0 ? Math.ceil(fixed / avg) : 0;
+            document.getElementById('bep-count').innerText = `${bep}件`;
+            document.getElementById('daily-target').innerText = `${Math.ceil(bep * 1.2)}件`;
+            const ctx = document.getElementById('bepChart').getContext('2d');
+            if(myChart) myChart.destroy();
+            myChart = new Chart(ctx, { type: 'line', data: { labels: ['0', 'BEP', 'Goal'], datasets: [{ data: [0, fixed, fixed*1.5], borderColor: '#0d9488', fill: true, backgroundColor: 'rgba(13, 148, 136, 0.1)' }] }, options: { plugins: { legend: { display: false } }, scales: { y: { display: false } } } });
+        }
+
+        window.onload = function() {
+            renderCalcItems();
+            updateDashboard();
+        };
+    </script>
+</body>
+</html>
