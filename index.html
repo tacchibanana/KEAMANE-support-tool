@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ケアプラン費用＆経営シミュレーター V1.5</title>
+    <title>ケアプラン費用＆経営シミュレーター V1.6</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
@@ -15,16 +15,21 @@
         input[type="number"], input[type="text"], select { border: 2px solid #cbd5e1; border-radius: 12px; padding: 10px; width: 100%; font-weight: 900; color: #1e293b; }
         input[type="number"] { font-size: 1.5rem; text-align: center; }
         
+        /* スクロール設定 */
         .scrollable-items { max-height: 500px; overflow-y: auto; padding-right: 5px; }
         .scrollable-items::-webkit-scrollbar { width: 8px; }
         .scrollable-items::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 10px; }
 
+        /* 署名欄スタイル */
+        .signature-pad { border: 2px dashed #cbd5e1; background: #fff; touch-action: none; cursor: crosshair; width: 100%; height: 120px; border-radius: 8px; }
+
         @media print {
-            nav, .no-print, button, #settings, #dash, #fixed-footer { display: none !important; }
+            nav, .no-print, button, #settings, #dash, #fixed-footer, .clear-btn { display: none !important; }
             body { background: white !important; padding: 0 !important; }
             .card { border: 2px solid #000 !important; box-shadow: none !important; margin: 0 !important; padding: 15px !important; }
             .scrollable-items { max-height: none !important; overflow: visible !important; }
             .print-only { display: block !important; }
+            .signature-pad { border: 1px solid #000; }
         }
         .print-only { display: none; }
     </style>
@@ -50,6 +55,7 @@
             </div>
             
             <div class="card shadow-sm p-4">
+                <!-- 設定エリア -->
                 <div class="grid grid-cols-2 gap-4 mb-4 no-print">
                     <div class="flex flex-col">
                         <label class="text-xs font-bold text-gray-500 mb-1">サービス切替</label>
@@ -87,6 +93,7 @@
                     </select>
                 </div>
 
+                <!-- 計算アイテムエリア -->
                 <div class="bg-slate-50 rounded-2xl mb-6 border-2 border-slate-200 p-4">
                     <div id="service-input-header">
                         <label class="text-base font-black text-slate-800 mb-3 block text-center" id="service-input-label">訪問介護：月間利用回数</label>
@@ -101,10 +108,31 @@
                     
                     <div class="scrollable-items space-y-6" id="calc-items-container"></div>
                 </div>
+
+                <!-- ✍️ 署名エリア -->
+                <div class="mt-8 border-t-2 border-slate-200 pt-6">
+                    <div class="grid grid-cols-1 gap-6">
+                        <div>
+                            <div class="flex justify-between items-end mb-2">
+                                <label class="text-sm font-black text-slate-700">ご署名（ご本人またはご家族）</label>
+                                <button onclick="clearCanvas('sig-user')" class="clear-btn text-[10px] bg-slate-200 px-2 py-1 rounded font-bold">書き直し</button>
+                            </div>
+                            <canvas id="sig-user" class="signature-pad"></canvas>
+                        </div>
+                        <div>
+                            <div class="flex justify-between items-end mb-2">
+                                <label class="text-sm font-black text-slate-700">説明者（ケアマネジャー等）</label>
+                                <button onclick="clearCanvas('sig-staff')" class="clear-btn text-[10px] bg-slate-200 px-2 py-1 rounded font-bold">書き直し</button>
+                            </div>
+                            <canvas id="sig-staff" class="signature-pad"></canvas>
+                        </div>
+                    </div>
+                    <p class="text-[10px] text-gray-400 mt-4 leading-tight">※本見積書は概算であり、実際の請求額は端数処理やサービス提供状況により変動する場合があります。</p>
+                </div>
             </div>
         </section>
 
-        <!-- 経営分析タブ -->
+        <!-- 経営分析タブ（変更なし） -->
         <section id="dash" class="tab-content no-print">
             <h2 class="text-2xl font-black mb-6">居宅経営分析ダッシュボード</h2>
             <div class="grid grid-cols-2 gap-4 mb-6 text-center">
@@ -131,7 +159,7 @@
             <div class="card"><canvas id="bepChart" height="220"></canvas></div>
         </section>
 
-        <!-- 設定タブ -->
+        <!-- 設定タブ（変更なし） -->
         <section id="settings" class="tab-content no-print">
             <h2 class="text-2xl font-black mb-6">システム設定</h2>
             <div class="card mb-8 border-teal-500 border-4">
@@ -186,6 +214,57 @@
     </div>
 
     <script>
+        // --- 署名機能のロジック ---
+        function initSignaturePad(canvasId) {
+            const canvas = document.getElementById(canvasId);
+            const ctx = canvas.getContext('2d');
+            let drawing = false;
+
+            // キャンバスの解像度設定
+            function resize() {
+                const rect = canvas.getBoundingClientRect();
+                canvas.width = rect.width;
+                canvas.height = rect.height;
+                ctx.lineWidth = 2;
+                ctx.lineCap = 'round';
+                ctx.strokeStyle = '#000';
+            }
+            window.addEventListener('resize', resize);
+            resize();
+
+            const getPos = (e) => {
+                const rect = canvas.getBoundingClientRect();
+                const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+                return { x: clientX - rect.left, y: clientY - rect.top };
+            };
+
+            const start = (e) => { drawing = true; draw(e); };
+            const end = () => { drawing = false; ctx.beginPath(); };
+            const draw = (e) => {
+                if (!drawing) return;
+                const pos = getPos(e);
+                ctx.lineTo(pos.x, pos.y);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(pos.x, pos.y);
+            };
+
+            canvas.addEventListener('mousedown', start);
+            canvas.addEventListener('mousemove', draw);
+            window.addEventListener('mouseup', end);
+            canvas.addEventListener('touchstart', (e) => { e.preventDefault(); start(e); });
+            canvas.addEventListener('touchmove', (e) => { e.preventDefault(); draw(e); });
+            canvas.addEventListener('touchend', end);
+        }
+
+        function clearCanvas(id) {
+            const canvas = document.getElementById(id);
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+
+        // --- 既存のロジック ---
         let masterData = {
             home_help: [
                 { name: '身01', price: 163, logic: 'base', checked: true, visits: 4 },
@@ -208,20 +287,11 @@
                 { name: 'ターミナルケア加算(外)', price: 2000, logic: 'limit_off_monthly', checked: false, visits: 1 },
                 { name: '初回加算1', price: 350, logic: 'monthly', checked: false, visits: 1 },
             ],
-            visit_rehab: [
-                { name: '訪問リハ1', price: 308, logic: 'base', checked: true, visits: 4 }
-            ],
-            day_care: [],
-            day_rehab: [],
-            short_stay: [],
-            welfare_equipment: []
+            visit_rehab: [{ name: '訪問リハ1', price: 308, logic: 'base', checked: true, visits: 4 }],
+            day_care: [], day_rehab: [], short_stay: [], welfare_equipment: []
         };
 
-        const typeLabels = { 
-            'home_help': '訪問介護', 'visit_nursing': '訪問看護', 'visit_rehab': '訪問リハビリ',
-            'day_care': '通所介護', 'day_rehab': '通所リハ', 'short_stay': '短期入所生活介護', 'welfare_equipment': '福祉用具'
-        };
-        
+        const typeLabels = { 'home_help': '訪問介護', 'visit_nursing': '訪問看護', 'visit_rehab': '訪問リハビリ', 'day_care': '通所介護', 'day_rehab': '通所リハ', 'short_stay': '短期入所生活介護', 'welfare_equipment': '福祉用具' };
         const logicConfig = {
             'base': { title: '🟦 基本サービス (回数乗算)', color: 'text-blue-700', bg: 'bg-blue-50', border: 'border-blue-500' },
             'deduction': { title: '🟥 減算項目 (基本から割合で減算)', color: 'text-red-700', bg: 'bg-red-50', border: 'border-red-500' },
@@ -255,47 +325,30 @@
 
         function toggleCheck(type, idx) {
             masterData[type][idx].checked = !masterData[type][idx].checked;
-            if(masterData[type][idx].checked && (masterData[type][idx].logic === 'base' || masterData[type][idx].logic === 'limit_off_base')) {
-                masterData[type][idx].visits = parseInt(document.getElementById('input-visit-count').value) || 0;
-            }
-            calculate();
-            renderCalcItems();
+            calculate(); renderCalcItems();
         }
 
         function renderCalcItems() {
             const type = document.getElementById('calc-type').value;
             const container = document.getElementById('calc-items-container');
             document.getElementById('service-input-label').innerText = `${typeLabels[type]}：月間利用回数`;
-            
             const firstBase = masterData[type].find(i => i.logic === 'base');
             document.getElementById('input-visit-count').value = firstBase ? firstBase.visits : 0;
-
             container.innerHTML = '';
             const order = ['base', 'deduction', 'monthly', 'treatment', 'limit_off_base', 'limit_off_monthly'];
-            
             order.forEach(logicType => {
                 const items = masterData[type].map((item, idx) => ({...item, idx})).filter(i => i.logic === logicType);
                 if(items.length === 0) return;
-
                 const groupDiv = document.createElement('div');
                 const conf = logicConfig[logicType];
                 let html = `<h3 class="text-xs font-black ${conf.color} mb-2 border-b-2 ${conf.border} pb-1">${conf.title}</h3><div class="space-y-2 mb-4">`;
-                
                 items.forEach(item => {
                     const priceDisp = (logicType === 'deduction' || logicType === 'treatment') ? `${(item.price * 100).toFixed(1)}%` : `${item.price}単位`;
-                    html += `
-                        <div onclick="toggleCheck('${type}', ${item.idx})" class="flex items-center justify-between p-3 border-2 rounded-xl cursor-pointer transition-colors ${item.checked ? conf.bg + ' ' + conf.border : 'bg-white border-slate-100'}">
-                            <div class="flex items-center gap-3">
-                                <input type="checkbox" class="w-5 h-5 accent-teal-600" ${item.checked ? 'checked' : ''} readOnly>
-                                <span class="font-bold text-sm text-slate-700">${item.name}</span>
-                            </div>
-                            <span class="text-xs font-black text-slate-500">${priceDisp}</span>
-                        </div>
-                    `;
+                    html += `<div onclick="toggleCheck('${type}', ${item.idx})" class="flex items-center justify-between p-3 border-2 rounded-xl cursor-pointer transition-colors ${item.checked ? conf.bg + ' ' + conf.border : 'bg-white border-slate-100'}">
+                        <div class="flex items-center gap-3"><input type="checkbox" class="w-5 h-5 accent-teal-600" ${item.checked ? 'checked' : ''} readOnly><span class="font-bold text-sm text-slate-700">${item.name}</span></div>
+                        <span class="text-xs font-black text-slate-500">${priceDisp}</span></div>`;
                 });
-                html += '</div>';
-                groupDiv.innerHTML = html;
-                container.appendChild(groupDiv);
+                html += '</div>'; groupDiv.innerHTML = html; container.appendChild(groupDiv);
             });
         }
 
@@ -303,55 +356,35 @@
             const ratio = parseFloat(document.getElementById('user-ratio').value);
             const unitPrice = parseFloat(document.getElementById('care-unit-price').value);
             const limit = parseInt(document.getElementById('care-level').value);
-
-            let limitOnUnitsTotal = 0;   
-            let limitOffUnitsTotal = 0;  
-
+            let limitOnUnitsTotal = 0; let limitOffUnitsTotal = 0;
             Object.keys(masterData).forEach(type => {
-                let baseTotal = 0, monthlyTotal = 0, deductRate = 0, treatRate = 0;
-                let offTotal = 0;
-
+                let baseTotal = 0, monthlyTotal = 0, deductRate = 0, treatRate = 0, offTotal = 0;
                 masterData[type].forEach(item => {
                     if(item.checked) {
-                        // 限度額内
                         if(item.logic === 'base') baseTotal += (item.price * (item.visits || 0));
                         if(item.logic === 'monthly') monthlyTotal += item.price;
                         if(item.logic === 'deduction') deductRate += item.price;
-                        
-                        // 限度額外（処遇改善を含む）
                         if(item.logic === 'treatment') treatRate += item.price;
                         if(item.logic === 'limit_off_base') offTotal += (item.price * (item.visits || 0));
                         if(item.logic === 'limit_off_monthly') offTotal += item.price;
                     }
                 });
-
-                // 管理対象（限度額内）の所定単位を計算
                 const deductUnits = Math.floor(baseTotal * deductRate);
                 const shoteiUnits = (baseTotal - deductUnits) + monthlyTotal;
                 limitOnUnitsTotal += shoteiUnits;
-
-                // 処遇改善（限度額外）の計算：所定単位に率を掛ける
                 const treatmentUnits = Math.floor(shoteiUnits * treatRate);
                 limitOffUnitsTotal += (treatmentUnits + offTotal);
             });
-
-            // アラート判定
             const isOver = limitOnUnitsTotal > limit;
             document.getElementById('fixed-total-units').innerText = limitOnUnitsTotal.toLocaleString() + ' 単位';
             document.getElementById('fixed-alert').classList.toggle('hidden', !isOver);
             document.getElementById('over-alert-main').classList.toggle('hidden', !isOver);
-            document.getElementById('fixed-footer').className = isOver ? "fixed bottom-0 left-0 w-full bg-red-950 text-white p-3 z-50 no-print" : "fixed bottom-0 left-0 w-full bg-slate-900 text-white p-3 z-50 no-print transition-colors duration-300";
-            
-            // 自己負担額（合算）
             const grandTotalUnits = limitOnUnitsTotal + limitOffUnitsTotal;
             const userTotal = Math.floor(Math.round(grandTotalUnits * unitPrice) * ratio);
             document.getElementById('fixed-user-cost').innerText = `¥${userTotal.toLocaleString()}`;
-            
             document.getElementById('calc-process').innerText = `(内訳) 管理対象:${limitOnUnitsTotal} + 対象外(処遇含):${limitOffUnitsTotal}`;
         }
 
-        // --- 共通管理機能 ---
-        let myChart;
         function updateDashboard() {
             const lightP = parseInt(document.getElementById('input-light').value) || 0;
             const heavyP = parseInt(document.getElementById('input-heavy').value) || 0;
@@ -363,21 +396,9 @@
             document.getElementById('bep-count').innerText = `${bep.toLocaleString()}件`;
             document.getElementById('target-count').innerText = `${target.toLocaleString()}件`;
             document.getElementById('val-ratio').innerText = `${ratio}% : ${100-ratio}%`;
-
             const ctx = document.getElementById('bepChart').getContext('2d');
-            if(myChart) myChart.destroy();
-            const labels = [0, bep, target, Math.max(target * 1.2, 50)];
-            myChart = new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: labels.map(l => l + '件'),
-                    datasets: [
-                        { label: '売上', data: labels.map(l => l * avgPrice), borderColor: '#0d9488', backgroundColor: 'rgba(13, 148, 136, 0.1)', fill: true, tension: 0.3, borderWidth: 4 },
-                        { label: '固定費', data: labels.map(l => fixedCost), borderColor: '#ef4444', borderDash: [5, 5], borderWidth: 2, pointRadius: 0 }
-                    ]
-                },
-                options: { plugins: { legend: { display: false } }, scales: { y: { ticks: { callback: (v) => '¥' + (v/10000) + '万' } } } }
-            });
+            if(window.myChart) window.myChart.destroy();
+            window.myChart = new Chart(ctx, { type: 'line', data: { labels: [0, bep, target, target*1.2].map(l => Math.round(l) + '件'), datasets: [{ label: '売上', data: [0, bep, target, target*1.2].map(l => l * avgPrice), borderColor: '#0d9488', backgroundColor: 'rgba(13, 148, 136, 0.1)', fill: true, tension: 0.3 }, { label: '固定費', data: new Array(4).fill(fixedCost), borderColor: '#ef4444', borderDash: [5, 5] }] }, options: { plugins: { legend: { display: false } } } });
         }
 
         function renderMaster() {
@@ -386,15 +407,10 @@
             Object.keys(masterData).forEach(type => {
                 const header = document.createElement('div');
                 header.className = 'bg-slate-200 p-2 mt-4 font-black text-xs rounded text-slate-600';
-                header.innerText = typeLabels[type];
-                container.appendChild(header);
+                header.innerText = typeLabels[type]; container.appendChild(header);
                 masterData[type].forEach((item, idx) => {
-                    const d = document.createElement('div');
-                    d.className = 'flex justify-between items-center bg-white p-4 border-b';
-                    const isRate = (item.logic === 'deduction' || item.logic === 'treatment');
-                    const isOff = (item.logic.startsWith('limit_off') || item.logic === 'treatment');
-                    d.innerHTML = `<div><span class="text-sm font-bold block ${isOff ? 'text-orange-600':''}">${item.name}${isOff ? ' (対象外)':''}</span><span class="text-[10px] text-gray-500">${isRate ? (item.price*100).toFixed(1)+'%' : item.price+'単位'}</span></div>
-                        <button onclick="deleteItem('${type}', ${idx})" class="text-red-500 font-bold text-sm bg-red-50 px-3 py-1 rounded">削除</button>`;
+                    const d = document.createElement('div'); d.className = 'flex justify-between items-center bg-white p-4 border-b';
+                    d.innerHTML = `<div><span class="text-sm font-bold block">${item.name}</span><span class="text-[10px] text-gray-500">${item.price}単位/割合</span></div><button onclick="deleteItem('${type}', ${idx})" class="text-red-500 font-bold text-sm">削除</button>`;
                     container.appendChild(d);
                 });
             });
@@ -405,17 +421,21 @@
             const name = document.getElementById('new-name').value;
             const priceVal = parseFloat(document.getElementById('new-price').value);
             const logic = document.getElementById('new-logic').value;
-            if(!name || isNaN(priceVal)) return alert("数値を正しく入力してください");
+            if(!name || isNaN(priceVal)) return alert("数値を入力してください");
             masterData[type].push({ name, price: priceVal, logic, checked: false, visits: 0 });
             renderMaster(); renderCalcItems();
-            document.getElementById('new-name').value = ''; document.getElementById('new-price').value = '';
         }
 
         function deleteItem(type, idx) {
             if(confirm('削除しますか？')) { masterData[type].splice(idx, 1); renderMaster(); renderCalcItems(); calculate(); }
         }
 
-        window.onload = () => { renderCalcItems(); updateDashboard(); calculate(); document.getElementById('print-date').innerText = new Date().toLocaleDateString(); };
+        window.onload = () => { 
+            renderCalcItems(); updateDashboard(); calculate(); 
+            document.getElementById('print-date').innerText = new Date().toLocaleDateString(); 
+            initSignaturePad('sig-user');
+            initSignaturePad('sig-staff');
+        };
     </script>
 </body>
 </html>
