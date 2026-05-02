@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ケアプラン費用＆経営シミュレーター V1.4 (完全復旧版)</title>
+    <title>ケアプラン費用＆経営シミュレーター V1.5</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
@@ -156,7 +156,7 @@
                         <option value="base">【限度額内】基本単位 (回数乗算)</option>
                         <option value="monthly">【限度額内】定額加算 (月額)</option>
                         <option value="deduction">【限度額内】減算割合 (基本から減算)</option>
-                        <option value="treatment">【限度額内】処遇改善割合</option>
+                        <option value="treatment">【限度額外】処遇改善割合</option>
                         <option value="limit_off_base">【限度額外】特定加算 (回数乗算)</option>
                         <option value="limit_off_monthly">【限度額外】特定加算 (月額定額)</option>
                     </select>
@@ -186,7 +186,6 @@
     </div>
 
     <script>
-        // --- 全初期マスタの復元 + 限度額外ロジック対応 ---
         let masterData = {
             home_help: [
                 { name: '身01', price: 163, logic: 'base', checked: true, visits: 4 },
@@ -197,28 +196,20 @@
                 { name: '生活3', price: 220, logic: 'base', checked: false, visits: 0 },
                 { name: '通院等昇降介助', price: 97, logic: 'base', checked: false, visits: 0 },
                 { name: '同一建物減算1', price: 0.10, logic: 'deduction', checked: false, visits: 0 },
-                { name: '同一建物減算3', price: 0.12, logic: 'deduction', checked: false, visits: 0 },
                 { name: '初回加算', price: 200, logic: 'monthly', checked: false, visits: 1 },
-                { name: '処遇改善1', price: 0.245, logic: 'treatment', checked: false, visits: 1 },
+                { name: '処遇改善1(外)', price: 0.245, logic: 'treatment', checked: false, visits: 1 },
                 { name: '特別地域加算(外)', price: 100, logic: 'limit_off_base', checked: false, visits: 0 },
             ],
             visit_nursing: [
                 { name: '訪看11', price: 314, logic: 'base', checked: true, visits: 4 },
-                { name: '訪看11準', price: 283, logic: 'base', checked: false, visits: 0 },
                 { name: '訪看12', price: 471, logic: 'base', checked: false, visits: 0 },
-                { name: '訪看12準', price: 424, logic: 'base', checked: false, visits: 0 },
-                { name: '訪看13', price: 823, logic: 'base', checked: false, visits: 0 },
-                { name: '訪看15', price: 294, logic: 'base', checked: false, visits: 0 },
-                { name: '特別管理加算1(外)', price: 500, logic: 'limit_off_monthly', checked: false, visits: 1 },
-                { name: '特別管理加算2(外)', price: 250, logic: 'limit_off_monthly', checked: false, visits: 1 },
                 { name: '緊急時訪問看護加算2(外)', price: 574, logic: 'limit_off_monthly', checked: false, visits: 1 },
+                { name: '特別管理加算1(外)', price: 500, logic: 'limit_off_monthly', checked: false, visits: 1 },
                 { name: 'ターミナルケア加算(外)', price: 2000, logic: 'limit_off_monthly', checked: false, visits: 1 },
                 { name: '初回加算1', price: 350, logic: 'monthly', checked: false, visits: 1 },
             ],
             visit_rehab: [
-                { name: '訪問リハ1', price: 308, logic: 'base', checked: true, visits: 4 },
-                { name: '訪問リハ2', price: 308, logic: 'base', checked: false, visits: 0 },
-                { name: '訪問リハ3', price: 308, logic: 'base', checked: false, visits: 0 }
+                { name: '訪問リハ1', price: 308, logic: 'base', checked: true, visits: 4 }
             ],
             day_care: [],
             day_rehab: [],
@@ -235,7 +226,7 @@
             'base': { title: '🟦 基本サービス (回数乗算)', color: 'text-blue-700', bg: 'bg-blue-50', border: 'border-blue-500' },
             'deduction': { title: '🟥 減算項目 (基本から割合で減算)', color: 'text-red-700', bg: 'bg-red-50', border: 'border-red-500' },
             'monthly': { title: '🟩 加算項目 (月額定額)', color: 'text-green-700', bg: 'bg-green-50', border: 'border-green-500' },
-            'treatment': { title: '🟪 処遇改善 (所定単位の合計に乗算)', color: 'text-purple-700', bg: 'bg-purple-50', border: 'border-purple-500' },
+            'treatment': { title: '🟧 処遇改善 (対象外・所定単位に乗算)', color: 'text-orange-700', bg: 'bg-orange-50', border: 'border-orange-500' },
             'limit_off_base': { title: '🟧 限度額対象外 (回数乗算)', color: 'text-orange-700', bg: 'bg-orange-50', border: 'border-orange-500' },
             'limit_off_monthly': { title: '🟧 限度額対象外 (月額定額)', color: 'text-orange-700', bg: 'bg-orange-50', border: 'border-orange-500' }
         };
@@ -322,37 +313,44 @@
 
                 masterData[type].forEach(item => {
                     if(item.checked) {
+                        // 限度額内
                         if(item.logic === 'base') baseTotal += (item.price * (item.visits || 0));
                         if(item.logic === 'monthly') monthlyTotal += item.price;
                         if(item.logic === 'deduction') deductRate += item.price;
+                        
+                        // 限度額外（処遇改善を含む）
                         if(item.logic === 'treatment') treatRate += item.price;
                         if(item.logic === 'limit_off_base') offTotal += (item.price * (item.visits || 0));
                         if(item.logic === 'limit_off_monthly') offTotal += item.price;
                     }
                 });
 
+                // 管理対象（限度額内）の所定単位を計算
                 const deductUnits = Math.floor(baseTotal * deductRate);
                 const shoteiUnits = (baseTotal - deductUnits) + monthlyTotal;
+                limitOnUnitsTotal += shoteiUnits;
+
+                // 処遇改善（限度額外）の計算：所定単位に率を掛ける
                 const treatmentUnits = Math.floor(shoteiUnits * treatRate);
-                
-                limitOnUnitsTotal += (shoteiUnits + treatmentUnits);
-                limitOffUnitsTotal += offTotal;
+                limitOffUnitsTotal += (treatmentUnits + offTotal);
             });
 
+            // アラート判定
             const isOver = limitOnUnitsTotal > limit;
             document.getElementById('fixed-total-units').innerText = limitOnUnitsTotal.toLocaleString() + ' 単位';
             document.getElementById('fixed-alert').classList.toggle('hidden', !isOver);
             document.getElementById('over-alert-main').classList.toggle('hidden', !isOver);
             document.getElementById('fixed-footer').className = isOver ? "fixed bottom-0 left-0 w-full bg-red-950 text-white p-3 z-50 no-print" : "fixed bottom-0 left-0 w-full bg-slate-900 text-white p-3 z-50 no-print transition-colors duration-300";
             
+            // 自己負担額（合算）
             const grandTotalUnits = limitOnUnitsTotal + limitOffUnitsTotal;
             const userTotal = Math.floor(Math.round(grandTotalUnits * unitPrice) * ratio);
             document.getElementById('fixed-user-cost').innerText = `¥${userTotal.toLocaleString()}`;
             
-            document.getElementById('calc-process').innerText = `(内訳) 管理対象:${limitOnUnitsTotal} + 対象外:${limitOffUnitsTotal}`;
+            document.getElementById('calc-process').innerText = `(内訳) 管理対象:${limitOnUnitsTotal} + 対象外(処遇含):${limitOffUnitsTotal}`;
         }
 
-        // --- 経営分析・マスタ管理機能 ---
+        // --- 共通管理機能 ---
         let myChart;
         function updateDashboard() {
             const lightP = parseInt(document.getElementById('input-light').value) || 0;
@@ -394,7 +392,7 @@
                     const d = document.createElement('div');
                     d.className = 'flex justify-between items-center bg-white p-4 border-b';
                     const isRate = (item.logic === 'deduction' || item.logic === 'treatment');
-                    const isOff = (item.logic.startsWith('limit_off'));
+                    const isOff = (item.logic.startsWith('limit_off') || item.logic === 'treatment');
                     d.innerHTML = `<div><span class="text-sm font-bold block ${isOff ? 'text-orange-600':''}">${item.name}${isOff ? ' (対象外)':''}</span><span class="text-[10px] text-gray-500">${isRate ? (item.price*100).toFixed(1)+'%' : item.price+'単位'}</span></div>
                         <button onclick="deleteItem('${type}', ${idx})" class="text-red-500 font-bold text-sm bg-red-50 px-3 py-1 rounded">削除</button>`;
                     container.appendChild(d);
