@@ -132,7 +132,7 @@
                     <p class="text-3xl font-black text-slate-800" id="bep-count">0件</p>
                 </div>
                 <div class="bg-white p-6 rounded-3xl shadow-sm border-b-8 border-teal-500">
-                    <p class="text-[10px] font-black text-gray-400 uppercase">推奨目標(利益20%)</p>
+                    <p class="text-[10px] font-black text-gray-400 uppercase" id="target-label">推奨目標(利益20%)</p>
                     <p class="text-3xl font-black text-teal-600" id="target-count">0件</p>
                 </div>
             </div>
@@ -145,7 +145,15 @@
                     <div class="flex justify-between mb-2 text-sm font-bold"><label>顧客比率 (支援:介護)</label><span id="val-ratio">30%:70%</span></div>
                     <input type="range" id="slide-ratio" min="0" max="100" value="30" class="w-full h-3 bg-gray-200 rounded-lg appearance-none accent-teal-600" oninput="updateDashboard()">
                 </div>
-                <div><label class="text-xs font-bold text-red-500">月間固定費</label><input type="number" id="input-fixed" value="1200000" oninput="updateDashboard()"></div>
+                <div>
+                    <label class="text-xs font-bold text-red-500">月間固定費</label>
+                    <input type="number" id="input-fixed" value="1200000" oninput="updateDashboard()">
+                </div>
+                <!-- 追加：目標利益率の変更スライダー -->
+                <div>
+                    <div class="flex justify-between mb-2 text-sm font-bold"><label class="text-blue-600">目標利益率設定</label><span id="val-margin" class="text-blue-600">20%</span></div>
+                    <input type="range" id="slide-margin" min="0" max="80" step="1" value="20" class="w-full h-3 bg-blue-100 rounded-lg appearance-none accent-blue-600" oninput="updateDashboard()">
+                </div>
             </div>
             <div class="card"><canvas id="bepChart" height="220"></canvas></div>
         </section>
@@ -298,13 +306,11 @@
             if(tabId === 'settings') renderMaster();
         }
 
-        // 個別の回数を増減させる関数
         function updateIndividualVisit(type, idx, delta) {
             const current = masterData[type][idx].visits || 0;
             const newVal = Math.max(0, current + delta);
             masterData[type][idx].visits = newVal;
             
-            // 回数が0になればチェックを外し、1以上ならチェックを入れる
             if (newVal === 0) {
                 masterData[type][idx].checked = false;
             } else {
@@ -318,7 +324,6 @@
         function toggleCheck(type, idx) {
             masterData[type][idx].checked = !masterData[type][idx].checked;
             
-            // チェックが入った際、回数計算ロジックで回数が0のままなら1に設定する
             if (masterData[type][idx].checked) {
                 const logic = masterData[type][idx].logic;
                 if ((logic === 'base' || logic === 'limit_off_base') && (!masterData[type][idx].visits || masterData[type][idx].visits === 0)) {
@@ -365,7 +370,6 @@
                             <span class="text-sm font-black w-6 text-center">${item.visits || 0}</span>
                             <button onclick="updateIndividualVisit('${type}', ${item.idx}, 1)" class="w-7 h-7 font-black text-teal-600 bg-teal-50 rounded hover:bg-teal-100">+</button>
                         </div>
-                        <!-- 印刷用の回数表示 -->
                         <div class="hidden print-only text-sm font-black text-slate-700">
                             ${item.visits || 0} 回
                         </div>
@@ -415,22 +419,42 @@
             document.getElementById('calc-process').innerText = `(内訳) 管理対象:${limitOnUnitsTotal} + 対象外(処遇含):${limitOffUnitsTotal}`;
         }
 
+        // 経営分析更新
         function updateDashboard() {
             const lightP = parseInt(document.getElementById('input-light').value) || 0;
             const heavyP = parseInt(document.getElementById('input-heavy').value) || 0;
             const ratio = parseInt(document.getElementById('slide-ratio').value);
             const fixedCost = parseInt(document.getElementById('input-fixed').value) || 0;
+            const targetMargin = parseInt(document.getElementById('slide-margin').value) || 0; // スライダーから取得
+            
             const avgPrice = (lightP * (ratio/100)) + (heavyP * ((100-ratio)/100));
             const bep = avgPrice > 0 ? Math.ceil(fixedCost / avgPrice) : 0;
-            const target = avgPrice > 0 ? Math.ceil((fixedCost * 1.25) / avgPrice) : 0;
             
+            // 目標利益率に基づく必要売上から推奨件数を計算
+            const requiredRevenue = targetMargin < 100 ? (fixedCost / (1 - (targetMargin / 100))) : fixedCost;
+            const target = avgPrice > 0 ? Math.ceil(requiredRevenue / avgPrice) : 0;
+            
+            // UIテキストの更新
             document.getElementById('bep-count').innerText = `${bep.toLocaleString()}件`;
             document.getElementById('target-count').innerText = `${target.toLocaleString()}件`;
             document.getElementById('val-ratio').innerText = `${ratio}% : ${100-ratio}%`;
+            document.getElementById('val-margin').innerText = `${targetMargin}%`;
+            document.getElementById('target-label').innerText = `推奨目標(利益${targetMargin}%)`;
             
             const ctx = document.getElementById('bepChart').getContext('2d');
             if(window.myChart) window.myChart.destroy();
-            window.myChart = new Chart(ctx, { type: 'line', data: { labels: [0, bep, target, target*1.2].map(l => Math.round(l) + '件'), datasets: [{ label: '売上', data: [0, bep, target, target*1.2].map(l => l * avgPrice), borderColor: '#0d9488', backgroundColor: 'rgba(13, 148, 136, 0.1)', fill: true, tension: 0.3 }, { label: '固定費', data: new Array(4).fill(fixedCost), borderColor: '#ef4444', borderDash: [5, 5] }] }, options: { plugins: { legend: { display: false } } } });
+            
+            window.myChart = new Chart(ctx, { 
+                type: 'line', 
+                data: { 
+                    labels: [0, bep, target, Math.floor(target*1.2)].map(l => Math.round(l) + '件'), 
+                    datasets: [
+                        { label: '売上', data: [0, bep, target, target*1.2].map(l => l * avgPrice), borderColor: '#0d9488', backgroundColor: 'rgba(13, 148, 136, 0.1)', fill: true, tension: 0.3 }, 
+                        { label: '固定費', data: new Array(4).fill(fixedCost), borderColor: '#ef4444', borderDash: [5, 5] }
+                    ] 
+                }, 
+                options: { plugins: { legend: { display: false } } } 
+            });
         }
 
         function renderMaster() {
