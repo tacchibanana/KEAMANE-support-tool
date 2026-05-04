@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ケアプラン費用＆経営シミュレーター V1.6</title>
+    <title>ケアプラン費用＆経営シミュレーター V1.6 カスタム</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
@@ -95,15 +95,6 @@
 
                 <!-- 計算アイテムエリア -->
                 <div class="bg-slate-50 rounded-2xl mb-6 border-2 border-slate-200 p-4">
-                    <div id="service-input-header">
-                        <label class="text-base font-black text-slate-800 mb-3 block text-center" id="service-input-label">訪問介護：月間利用回数</label>
-                        <div class="flex items-center gap-6 mb-6">
-                            <button onclick="adjustVal('input-visit-count', -1)" class="no-print w-12 h-12 bg-white border-2 border-slate-300 rounded-full font-black text-2xl shadow-sm">-</button>
-                            <input type="number" id="input-visit-count" value="4" min="0" class="flex-1 text-3xl" oninput="updateVisitCount()">
-                            <button onclick="adjustVal('input-visit-count', 1)" class="no-print w-12 h-12 bg-white border-2 border-slate-300 rounded-full font-black text-2xl shadow-sm">+</button>
-                        </div>
-                    </div>
-
                     <div id="over-alert-main" class="hidden bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-4 rounded font-bold text-sm">⚠️ 支給限度額を超過しています</div>
                     
                     <div class="scrollable-items space-y-6" id="calc-items-container"></div>
@@ -132,7 +123,7 @@
             </div>
         </section>
 
-        <!-- 経営分析タブ（変更なし） -->
+        <!-- 経営分析タブ -->
         <section id="dash" class="tab-content no-print">
             <h2 class="text-2xl font-black mb-6">居宅経営分析ダッシュボード</h2>
             <div class="grid grid-cols-2 gap-4 mb-6 text-center">
@@ -159,7 +150,7 @@
             <div class="card"><canvas id="bepChart" height="220"></canvas></div>
         </section>
 
-        <!-- 設定タブ（変更なし） -->
+        <!-- 設定タブ -->
         <section id="settings" class="tab-content no-print">
             <h2 class="text-2xl font-black mb-6">システム設定</h2>
             <div class="card mb-8 border-teal-500 border-4">
@@ -220,7 +211,6 @@
             const ctx = canvas.getContext('2d');
             let drawing = false;
 
-            // キャンバスの解像度設定
             function resize() {
                 const rect = canvas.getBoundingClientRect();
                 canvas.width = rect.width;
@@ -253,8 +243,8 @@
             canvas.addEventListener('mousedown', start);
             canvas.addEventListener('mousemove', draw);
             window.addEventListener('mouseup', end);
-            canvas.addEventListener('touchstart', (e) => { e.preventDefault(); start(e); });
-            canvas.addEventListener('touchmove', (e) => { e.preventDefault(); draw(e); });
+            canvas.addEventListener('touchstart', (e) => { e.preventDefault(); start(e); }, {passive: false});
+            canvas.addEventListener('touchmove', (e) => { e.preventDefault(); draw(e); }, {passive: false});
             canvas.addEventListener('touchend', end);
         }
 
@@ -308,47 +298,83 @@
             if(tabId === 'settings') renderMaster();
         }
 
-        function adjustVal(id, amount) {
-            const el = document.getElementById(id);
-            el.value = Math.max(0, parseInt(el.value) + amount);
-            updateVisitCount();
-        }
-
-        function updateVisitCount() {
-            const type = document.getElementById('calc-type').value;
-            const val = parseInt(document.getElementById('input-visit-count').value) || 0;
-            masterData[type].forEach(item => {
-                if(item.logic === 'base' || item.logic === 'limit_off_base') item.visits = val;
-            });
+        // 個別の回数を増減させる関数
+        function updateIndividualVisit(type, idx, delta) {
+            const current = masterData[type][idx].visits || 0;
+            const newVal = Math.max(0, current + delta);
+            masterData[type][idx].visits = newVal;
+            
+            // 回数が0になればチェックを外し、1以上ならチェックを入れる
+            if (newVal === 0) {
+                masterData[type][idx].checked = false;
+            } else {
+                masterData[type][idx].checked = true;
+            }
+            
             calculate();
+            renderCalcItems();
         }
 
         function toggleCheck(type, idx) {
             masterData[type][idx].checked = !masterData[type][idx].checked;
-            calculate(); renderCalcItems();
+            
+            // チェックが入った際、回数計算ロジックで回数が0のままなら1に設定する
+            if (masterData[type][idx].checked) {
+                const logic = masterData[type][idx].logic;
+                if ((logic === 'base' || logic === 'limit_off_base') && (!masterData[type][idx].visits || masterData[type][idx].visits === 0)) {
+                    masterData[type][idx].visits = 1;
+                }
+            }
+            
+            calculate(); 
+            renderCalcItems();
         }
 
         function renderCalcItems() {
             const type = document.getElementById('calc-type').value;
             const container = document.getElementById('calc-items-container');
-            document.getElementById('service-input-label').innerText = `${typeLabels[type]}：月間利用回数`;
-            const firstBase = masterData[type].find(i => i.logic === 'base');
-            document.getElementById('input-visit-count').value = firstBase ? firstBase.visits : 0;
             container.innerHTML = '';
+            
             const order = ['base', 'deduction', 'monthly', 'treatment', 'limit_off_base', 'limit_off_monthly'];
+            
             order.forEach(logicType => {
                 const items = masterData[type].map((item, idx) => ({...item, idx})).filter(i => i.logic === logicType);
                 if(items.length === 0) return;
+                
                 const groupDiv = document.createElement('div');
                 const conf = logicConfig[logicType];
                 let html = `<h3 class="text-xs font-black ${conf.color} mb-2 border-b-2 ${conf.border} pb-1">${conf.title}</h3><div class="space-y-2 mb-4">`;
+                
                 items.forEach(item => {
-                    const priceDisp = (logicType === 'deduction' || logicType === 'treatment') ? `${(item.price * 100).toFixed(1)}%` : `${item.price}単位`;
-                    html += `<div onclick="toggleCheck('${type}', ${item.idx})" class="flex items-center justify-between p-3 border-2 rounded-xl cursor-pointer transition-colors ${item.checked ? conf.bg + ' ' + conf.border : 'bg-white border-slate-100'}">
-                        <div class="flex items-center gap-3"><input type="checkbox" class="w-5 h-5 accent-teal-600" ${item.checked ? 'checked' : ''} readOnly><span class="font-bold text-sm text-slate-700">${item.name}</span></div>
-                        <span class="text-xs font-black text-slate-500">${priceDisp}</span></div>`;
+                    const isRate = (logicType === 'deduction' || logicType === 'treatment');
+                    const priceDisp = isRate ? `${(item.price * 100).toFixed(1)}%` : `${item.price}単位`;
+                    const needsCounter = (logicType === 'base' || logicType === 'limit_off_base');
+                    
+                    html += `
+                    <div class="flex items-center justify-between p-3 border-2 rounded-xl transition-colors ${item.checked ? conf.bg + ' ' + conf.border : 'bg-white border-slate-100'}">
+                        <div class="flex items-center gap-3 flex-1 cursor-pointer" onclick="toggleCheck('${type}', ${item.idx})">
+                            <input type="checkbox" class="w-5 h-5 accent-teal-600" ${item.checked ? 'checked' : ''} readOnly>
+                            <div class="flex flex-col">
+                                <span class="font-bold text-sm text-slate-700">${item.name}</span>
+                                <span class="text-[10px] font-black text-slate-500">${priceDisp}</span>
+                            </div>
+                        </div>
+                        ${needsCounter ? `
+                        <div class="flex items-center gap-2 bg-white px-2 py-1 rounded-lg border-2 border-slate-200 shadow-sm no-print" onclick="event.stopPropagation()">
+                            <button onclick="updateIndividualVisit('${type}', ${item.idx}, -1)" class="w-7 h-7 font-black text-slate-500 bg-slate-100 rounded hover:bg-slate-200">-</button>
+                            <span class="text-sm font-black w-6 text-center">${item.visits || 0}</span>
+                            <button onclick="updateIndividualVisit('${type}', ${item.idx}, 1)" class="w-7 h-7 font-black text-teal-600 bg-teal-50 rounded hover:bg-teal-100">+</button>
+                        </div>
+                        <!-- 印刷用の回数表示 -->
+                        <div class="hidden print-only text-sm font-black text-slate-700">
+                            ${item.visits || 0} 回
+                        </div>
+                        ` : ''}
+                    </div>`;
                 });
-                html += '</div>'; groupDiv.innerHTML = html; container.appendChild(groupDiv);
+                html += '</div>'; 
+                groupDiv.innerHTML = html; 
+                container.appendChild(groupDiv);
             });
         }
 
@@ -357,6 +383,7 @@
             const unitPrice = parseFloat(document.getElementById('care-unit-price').value);
             const limit = parseInt(document.getElementById('care-level').value);
             let limitOnUnitsTotal = 0; let limitOffUnitsTotal = 0;
+            
             Object.keys(masterData).forEach(type => {
                 let baseTotal = 0, monthlyTotal = 0, deductRate = 0, treatRate = 0, offTotal = 0;
                 masterData[type].forEach(item => {
@@ -375,12 +402,15 @@
                 const treatmentUnits = Math.floor(shoteiUnits * treatRate);
                 limitOffUnitsTotal += (treatmentUnits + offTotal);
             });
+            
             const isOver = limitOnUnitsTotal > limit;
             document.getElementById('fixed-total-units').innerText = limitOnUnitsTotal.toLocaleString() + ' 単位';
             document.getElementById('fixed-alert').classList.toggle('hidden', !isOver);
             document.getElementById('over-alert-main').classList.toggle('hidden', !isOver);
+            
             const grandTotalUnits = limitOnUnitsTotal + limitOffUnitsTotal;
             const userTotal = Math.floor(Math.round(grandTotalUnits * unitPrice) * ratio);
+            
             document.getElementById('fixed-user-cost').innerText = `¥${userTotal.toLocaleString()}`;
             document.getElementById('calc-process').innerText = `(内訳) 管理対象:${limitOnUnitsTotal} + 対象外(処遇含):${limitOffUnitsTotal}`;
         }
@@ -393,9 +423,11 @@
             const avgPrice = (lightP * (ratio/100)) + (heavyP * ((100-ratio)/100));
             const bep = avgPrice > 0 ? Math.ceil(fixedCost / avgPrice) : 0;
             const target = avgPrice > 0 ? Math.ceil((fixedCost * 1.25) / avgPrice) : 0;
+            
             document.getElementById('bep-count').innerText = `${bep.toLocaleString()}件`;
             document.getElementById('target-count').innerText = `${target.toLocaleString()}件`;
             document.getElementById('val-ratio').innerText = `${ratio}% : ${100-ratio}%`;
+            
             const ctx = document.getElementById('bepChart').getContext('2d');
             if(window.myChart) window.myChart.destroy();
             window.myChart = new Chart(ctx, { type: 'line', data: { labels: [0, bep, target, target*1.2].map(l => Math.round(l) + '件'), datasets: [{ label: '売上', data: [0, bep, target, target*1.2].map(l => l * avgPrice), borderColor: '#0d9488', backgroundColor: 'rgba(13, 148, 136, 0.1)', fill: true, tension: 0.3 }, { label: '固定費', data: new Array(4).fill(fixedCost), borderColor: '#ef4444', borderDash: [5, 5] }] }, options: { plugins: { legend: { display: false } } } });
